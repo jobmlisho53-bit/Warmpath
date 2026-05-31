@@ -1,15 +1,19 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { Flame, Mail, Lock, ArrowRight, Eye, EyeOff } from 'lucide-react'
 
 export default function Login() {
-  const { login } = useAuth()
-  const navigate  = useNavigate()
-  const [form,    setForm]    = useState({ email:'', password:'' })
-  const [error,   setError]   = useState('')
-  const [loading, setLoading] = useState(false)
-  const [show,    setShow]    = useState(false)
+  const { login }   = useAuth()
+  const navigate    = useNavigate()
+  const location    = useLocation()
+  const [form,      setForm]    = useState({ email:'', password:'' })
+  const [error,     setError]   = useState('')
+  const [loading,   setLoading] = useState(false)
+  const [show,      setShow]    = useState(false)
+
+  const params     = new URLSearchParams(location.search)
+  const redirectTo = params.get('redirect') || '/dashboard'
 
   const handle = e => setForm(f => ({ ...f, [e.target.name]: e.target.value }))
 
@@ -19,7 +23,7 @@ export default function Login() {
     setLoading(true)
     const res = await login(form.email, form.password)
     setLoading(false)
-    if (res.ok) navigate('/dashboard')
+    if (res.ok) navigate(redirectTo, { replace: true })
     else setError(res.error)
   }
 
@@ -30,8 +34,9 @@ export default function Login() {
 
       <div className="w-full max-w-md relative animate-scale-in">
         <div className="text-center mb-8">
-          <Link to="/" className="inline-flex items-center gap-2 mb-6 group">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-ember-500 to-terra-600 flex items-center justify-center shadow-glow-ember">
+          <Link to="/" className="inline-flex items-center gap-2 mb-6">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center shadow-glow-ember"
+              style={{ background:'linear-gradient(135deg,#F07A1A,#C85528)' }}>
               <Flame size={18} className="text-white" />
             </div>
             <span className="font-display font-700 text-xl text-gradient-ember">WarmPath</span>
@@ -47,7 +52,6 @@ export default function Login() {
                 {error}
               </div>
             )}
-
             <div>
               <label className="label">Email address</label>
               <div className="relative">
@@ -57,11 +61,8 @@ export default function Login() {
                   className="input-field pl-10" />
               </div>
             </div>
-
             <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="label mb-0">Password</label>
-              </div>
+              <label className="label">Password</label>
               <div className="relative">
                 <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-faint)]" />
                 <input name="password" type={show ? 'text' : 'password'} value={form.password} onChange={handle}
@@ -73,7 +74,6 @@ export default function Login() {
                 </button>
               </div>
             </div>
-
             <button type="submit" disabled={loading}
               className="btn-primary w-full justify-center py-3 mt-1 text-base">
               {loading ? (
@@ -86,11 +86,24 @@ export default function Login() {
               ) : <>Sign in <ArrowRight size={16} /></>}
             </button>
           </form>
+
+          {/* Divider */}
+          <div className="flex items-center gap-3 my-5">
+            <div className="flex-1 h-px bg-[var(--border)]" />
+            <span className="text-xs text-ink-600">or</span>
+            <div className="flex-1 h-px bg-[var(--border)]" />
+          </div>
+
+          {/* Guest mode */}
+          <Link to="/courses"
+            className="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg border border-[var(--border-mid)] text-sm text-ink-300 hover:text-ink-100 hover:border-[var(--border-hi)] hover:bg-[var(--bg-surface)] transition-all duration-150">
+            Browse as guest <ArrowRight size={14} />
+          </Link>
         </div>
 
         <p className="text-center text-sm text-ink-400 mt-6">
           No account?{' '}
-          <Link to="/signup" className="text-ember-400 hover:text-ember-300 font-medium transition-colors">
+          <Link to={`/signup${location.search}`} className="text-ember-400 hover:text-ember-300 font-medium transition-colors">
             Create one free →
           </Link>
         </p>

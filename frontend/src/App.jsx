@@ -49,10 +49,12 @@ function AppRoutes() {
     <>
       {!isAdmin && <Navbar />}
       <Routes>
-        {/* Public */}
+        {/* Fully public — no auth required */}
         <Route path="/"                               element={<Landing />} />
         <Route path="/login"                          element={<Login />} />
         <Route path="/signup"                         element={<Signup />} />
+        <Route path="/courses"                        element={<Courses />} />
+        <Route path="/courses/:name"                  element={<CourseDetail />} />
         <Route path="/leaderboard"                    element={<Leaderboard />} />
         <Route path="/verify/:code"                   element={<VerifyCertificate />} />
         <Route path="/profile/:userId"                element={<Profile />} />
@@ -63,14 +65,12 @@ function AppRoutes() {
         <Route path="/blog"                           element={<Blog />} />
         <Route path="/blog/:slug"                     element={<BlogPost />} />
 
-        {/* Student protected */}
+        {/* Auth required */}
         <Route path="/dashboard"                      element={<Protected><Dashboard /></Protected>} />
-        <Route path="/courses"                        element={<Protected><Courses /></Protected>} />
-        <Route path="/courses/:name"                  element={<Protected><CourseDetail /></Protected>} />
         <Route path="/courses/:name/certificate"      element={<Protected><CertificateLock /></Protected>} />
         <Route path="/courses/:name/certificate/view" element={<Protected><CertificateView /></Protected>} />
         <Route path="/certificates"                   element={<Protected><MyCertificates /></Protected>} />
-        <Route path="/shop"                           element={<Protected><Shop /></Protected>} />
+        <Route path="/shop"                           element={<Shop />} />
         <Route path="/shop/cart"                      element={<Protected><Cart /></Protected>} />
         <Route path="/shop/downloads"                 element={<Protected><Downloads /></Protected>} />
 

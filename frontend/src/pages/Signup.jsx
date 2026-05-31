@@ -1,18 +1,27 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { Flame, User, Mail, Lock, ArrowRight, Eye, EyeOff, CheckCircle, MailCheck } from 'lucide-react'
 
-const PERKS = ['20+ free courses','XP & streaks system','Verified certificates','Community discussions']
+const PERKS = [
+  '20+ free courses — structured and curated',
+  'XP, streaks, badges and leaderboard',
+  'Verified certificates (KES 999)',
+  'Community discussions per course',
+]
 
 export default function Signup() {
   const { signup }  = useAuth()
   const navigate    = useNavigate()
+  const location    = useLocation()
   const [form,      setForm]      = useState({ name:'', email:'', password:'' })
   const [error,     setError]     = useState('')
   const [loading,   setLoading]   = useState(false)
   const [show,      setShow]      = useState(false)
   const [confirmed, setConfirmed] = useState(false)
+
+  const params     = new URLSearchParams(location.search)
+  const redirectTo = params.get('redirect') || '/dashboard'
 
   const handle = e => setForm(f => ({ ...f, [e.target.name]: e.target.value }))
 
@@ -25,24 +34,25 @@ export default function Signup() {
     setLoading(false)
     if (!res.ok) { setError(res.error); return }
     if (res.confirm) { setConfirmed(true); return }
-    navigate('/dashboard')
+    navigate(redirectTo, { replace: true })
   }
 
-  // Email confirmation screen
   if (confirmed) return (
     <div className="min-h-screen flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-ember-mesh pointer-events-none" />
       <div className="w-full max-w-md animate-scale-in relative text-center">
         <div className="card p-10 border-[var(--border-mid)] shadow-lifted">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-ember-500 to-terra-600 flex items-center justify-center mx-auto mb-5 shadow-glow-ember">
+          <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-glow-ember"
+            style={{ background:'linear-gradient(135deg,#F07A1A,#C85528)' }}>
             <MailCheck size={28} className="text-white" />
           </div>
           <h1 className="font-display text-2xl font-700 mb-3">Check your inbox</h1>
           <p className="text-ink-400 text-sm leading-relaxed mb-6">
-            We sent a confirmation link to <span className="text-[var(--text-base)] font-medium">{form.email}</span>.
-            Click it to activate your account, then come back and sign in.
+            We sent a confirmation link to{' '}
+            <span className="text-[var(--text-base)] font-medium">{form.email}</span>.
+            Click it to activate your account, then sign in.
           </p>
-          <Link to="/login" className="btn-primary w-full justify-center py-3">
+          <Link to={`/login?redirect=${encodeURIComponent(redirectTo)}`} className="btn-primary w-full justify-center py-3">
             Go to sign in <ArrowRight size={15} />
           </Link>
         </div>
@@ -53,7 +63,6 @@ export default function Signup() {
   return (
     <div className="min-h-screen flex items-center justify-center p-4 relative">
       <div className="absolute inset-0 bg-ember-mesh pointer-events-none" />
-      <div className="absolute top-1/3 right-1/4 w-80 h-80 bg-terra-500/5 rounded-full blur-3xl pointer-events-none" />
 
       <div className="w-full max-w-4xl relative grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 items-center">
 
@@ -61,7 +70,8 @@ export default function Signup() {
         <div className="hidden lg:flex flex-col gap-8 animate-fade-in">
           <div>
             <Link to="/" className="inline-flex items-center gap-2 group mb-8">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-ember-500 to-terra-600 flex items-center justify-center shadow-glow-ember">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center shadow-glow-ember"
+                style={{ background:'linear-gradient(135deg,#F07A1A,#C85528)' }}>
                 <Flame size={18} className="text-white" />
               </div>
               <span className="font-display font-700 text-xl text-gradient-ember">WarmPath</span>
@@ -71,15 +81,14 @@ export default function Signup() {
               <span className="text-gradient-ember">learning path</span><br />
               today.
             </h2>
-            <p className="text-ink-400 leading-relaxed">
+            <p className="text-ink-400 leading-relaxed text-sm">
               Join thousands of African learners building real tech skills — completely free.
             </p>
           </div>
           <div className="flex flex-col gap-3">
             {PERKS.map(p => (
               <div key={p} className="flex items-center gap-3 text-sm text-ink-300">
-                <CheckCircle size={16} className="text-sage-400 flex-shrink-0" />
-                {p}
+                <CheckCircle size={15} className="text-sage-400 flex-shrink-0" /> {p}
               </div>
             ))}
           </div>
@@ -95,7 +104,8 @@ export default function Signup() {
         <div className="animate-scale-in">
           <div className="lg:hidden text-center mb-8">
             <Link to="/" className="inline-flex items-center gap-2">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-ember-500 to-terra-600 flex items-center justify-center">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center"
+                style={{ background:'linear-gradient(135deg,#F07A1A,#C85528)' }}>
                 <Flame size={16} className="text-white" />
               </div>
               <span className="font-display font-700 text-lg text-gradient-ember">WarmPath</span>
@@ -156,11 +166,22 @@ export default function Signup() {
                 ) : <>Create free account <ArrowRight size={16} /></>}
               </button>
             </form>
+
+            {/* Divider + guest mode */}
+            <div className="flex items-center gap-3 my-5">
+              <div className="flex-1 h-px bg-[var(--border)]" />
+              <span className="text-xs text-ink-600">or</span>
+              <div className="flex-1 h-px bg-[var(--border)]" />
+            </div>
+            <Link to="/courses"
+              className="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg border border-[var(--border-mid)] text-sm text-ink-300 hover:text-ink-100 hover:border-[var(--border-hi)] hover:bg-[var(--bg-surface)] transition-all duration-150">
+              Browse as guest <ArrowRight size={14} />
+            </Link>
           </div>
 
           <p className="text-center text-sm text-ink-400 mt-5">
             Already have an account?{' '}
-            <Link to="/login" className="text-ember-400 hover:text-ember-300 font-medium transition-colors">
+            <Link to={`/login${location.search}`} className="text-ember-400 hover:text-ember-300 font-medium transition-colors">
               Sign in →
             </Link>
           </p>

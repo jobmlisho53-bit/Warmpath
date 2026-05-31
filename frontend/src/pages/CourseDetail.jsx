@@ -1,37 +1,47 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import api from '../lib/api'
+import GuestPrompt from '../components/GuestPrompt'
 import {
   Play, CheckCircle, Circle, ChevronDown,
   Award, MessageSquare, Send, Flame,
   BookOpen, ArrowLeft, ChevronLeft, ChevronRight,
-  Lock, CornerDownRight
+  Lock, CornerDownRight, UserPlus
 } from 'lucide-react'
+
+const PROMPT_THRESHOLD  = 3   // show first prompt after N lessons
+const PROMPT_INTERVAL   = 5   // then every N more
+const PROMPT_MAX        = 3   // max prompts per session
 
 export default function CourseDetail() {
   const { name }   = useParams()
   const { isAuth } = useAuth()
   const navigate   = useNavigate()
 
-  const [course,       setCourse]       = useState(null)
-  const [progress,     setProgress]     = useState({})
-  const [allLessons,   setAllLessons]   = useState([])
-  const [activeLesson, setActiveLesson] = useState(null)
-  const [openModules,  setOpenModules]  = useState({})
-  const [enrolled,     setEnrolled]     = useState(false)
-  const [enrolling,    setEnrolling]    = useState(false)
-  const [discussions,  setDiscussions]  = useState([])
-  const [activeThread, setActiveThread] = useState(null)
-  const [replies,      setReplies]      = useState([])
-  const [tab,          setTab]          = useState('lessons')
-  const [newPost,      setNewPost]      = useState({ title:'', content:'' })
-  const [newReply,     setNewReply]     = useState('')
-  const [posting,      setPosting]      = useState(false)
-  const [replyPosting, setReplyPosting] = useState(false)
-  const [loading,      setLoading]      = useState(true)
+  const [course,         setCourse]         = useState(null)
+  const [progress,       setProgress]       = useState({})
+  const [allLessons,     setAllLessons]     = useState([])
+  const [activeLesson,   setActiveLesson]   = useState(null)
+  const [openModules,    setOpenModules]    = useState({})
+  const [enrolled,       setEnrolled]       = useState(false)
+  const [discussions,    setDiscussions]    = useState([])
+  const [activeThread,   setActiveThread]   = useState(null)
+  const [replies,        setReplies]        = useState([])
+  const [tab,            setTab]            = useState('lessons')
+  const [newPost,        setNewPost]        = useState({ title:'', content:'' })
+  const [newReply,       setNewReply]       = useState('')
+  const [posting,        setPosting]        = useState(false)
+  const [replyPosting,   setReplyPosting]   = useState(false)
+  const [loading,        setLoading]        = useState(true)
 
-  // Step 1 — load course
+  // Guest conversion tracking
+  const [guestWatchCount, setGuestWatchCount] = useState(0)
+  const [showPrompt,      setShowPrompt]      = useState(false)
+  const promptShownCount  = useRef(0)
+  const nextPromptAt      = useRef(PROMPT_THRESHOLD)
+
+  // Load course
   useEffect(() => {
     api.get(`/courses/${name}`)
       .then(r => {
@@ -51,20 +61,14 @@ export default function CourseDetail() {
       .finally(() => setLoading(false))
   }, [name])
 
-  // Step 2 — once course is loaded AND user is auth, auto-enroll + load progress
+  // Auth: auto-enroll + load progress
   useEffect(() => {
     if (!isAuth || !course?.id) return
-
-    async function enrollAndLoadProgress() {
+    async function enrollAndLoad() {
       try {
-        // Auto-enroll on every visit — backend uses upsert so duplicate calls are safe
         await api.post(`/courses/${course.id}/enroll`)
         setEnrolled(true)
-      } catch (e) {
-        console.warn('Auto-enroll failed:', e.response?.data)
-      }
-
-      // Load progress regardless of enroll success
+      } catch (e) { console.warn('Enroll:', e.response?.data) }
       try {
         const r = await api.get(`/progress/courses/${course.id}`)
         const ids = r.data?.completed_lessons ?? []
@@ -72,15 +76,26 @@ export default function CourseDetail() {
         ids.forEach(id => { map[id] = true })
         setProgress(map)
         setEnrolled(true)
-      } catch (e) {
-        console.warn('Progress load failed:', e.response?.data)
-      }
+      } catch (e) { console.warn('Progress:', e.response?.data) }
     }
-
-    enrollAndLoadProgress()
+    enrollAndLoad()
   }, [course?.id, isAuth])
 
-  // Load discussions when discuss tab opens
+  // Guest: track lesson views and trigger prompt
+  useEffect(() => {
+    if (isAuth || !activeLesson) return
+    setGuestWatchCount(prev => {
+      const next = prev + 1
+      if (next >= nextPromptAt.current && promptShownCount.current < PROMPT_MAX) {
+        setShowPrompt(true)
+        promptShownCount.current += 1
+        nextPromptAt.current = next + PROMPT_INTERVAL
+      }
+      return next
+    })
+  }, [activeLesson?.id])
+
+  // Load discussions
   useEffect(() => {
     if (!course?.id || tab !== 'discuss') return
     api.get(`/community/courses/${course.id}/discussions`)
@@ -92,11 +107,8 @@ export default function CourseDetail() {
     setReplies([])
     try {
       const r = await api.get(`/community/discussions/${discussion.id}`)
-      const data = r.data?.discussion ?? r.data
-      setReplies(data?.replies ?? [])
-    } catch (e) {
-      console.warn('Failed to load replies:', e)
-    }
+      setReplies((r.data?.discussion ?? r.data)?.replies ?? [])
+    } catch {}
   }
 
   const toggleLesson = async (lesson) => {
@@ -122,7 +134,7 @@ export default function CourseDetail() {
     setReplyPosting(true)
     try {
       const r = await api.post(`/community/discussions/${activeThread.id}/replies`, { content: newReply })
-      setReplies(prev => [...prev, r.data])
+      setReplies(p => [...p, r.data])
       setNewReply('')
     } finally { setReplyPosting(false) }
   }
@@ -144,6 +156,9 @@ export default function CourseDetail() {
     ? `https://www.youtube.com/embed/${activeLesson.youtube_id}?rel=0&modestbranding=1`
     : null
 
+  // Signup redirect URL for guest CTAs
+  const signupUrl = `/signup?redirect=${encodeURIComponent(`/courses/${name}`)}`
+
   if (loading) return (
     <div className="min-h-screen pt-24 flex items-center justify-center">
       <div className="w-12 h-12 rounded-full border-2 border-ember-500 border-t-transparent animate-spin" />
@@ -153,6 +168,15 @@ export default function CourseDetail() {
 
   return (
     <div className="min-h-screen pt-16">
+
+      {/* Guest conversion prompt */}
+      {showPrompt && !isAuth && (
+        <GuestPrompt
+          courseSlug={name}
+          watchCount={guestWatchCount}
+          onDismiss={() => setShowPrompt(false)}
+        />
+      )}
 
       {/* Top bar */}
       <div className="glass-nav sticky top-16 z-40 py-3">
@@ -165,24 +189,23 @@ export default function CourseDetail() {
             </div>
           </div>
           <div className="flex items-center gap-3 flex-shrink-0">
-            {enrolled && (
+            {isAuth && enrolled && (
               <div className="hidden sm:flex items-center gap-2">
-                <div className="progress-bar w-24">
-                  <div className="progress-fill" style={{ width:`${pct}%` }} />
-                </div>
+                <div className="progress-bar w-24"><div className="progress-fill" style={{ width:`${pct}%` }} /></div>
                 <span className="text-xs text-ember-400 font-medium">{pct}%</span>
               </div>
             )}
-            <Link to={`/courses/${name}/certificate`} className="btn-primary text-xs py-2">
-              <Award size={13} /> Certificate
-            </Link>
+            {isAuth
+              ? <Link to={`/courses/${name}/certificate`} className="btn-primary text-xs py-2"><Award size={13} /> Certificate</Link>
+              : <Link to={signupUrl} className="btn-primary text-xs py-2"><UserPlus size={13} /> Sign up free</Link>
+            }
           </div>
         </div>
       </div>
 
       <div className="flex flex-col lg:flex-row" style={{ minHeight:'calc(100vh - 8rem)' }}>
 
-        {/* LEFT: Player + tabs */}
+        {/* LEFT: Player + controls */}
         <div className="flex-1 flex flex-col min-w-0">
 
           {/* Video */}
@@ -200,7 +223,7 @@ export default function CourseDetail() {
             }
           </div>
 
-          {/* Lesson info + mark done + prev/next */}
+          {/* Lesson info */}
           {activeLesson && (
             <div className="p-4 bg-[var(--bg-raised)] border-b border-[var(--border)]">
               <div className="flex items-start justify-between gap-4 mb-3">
@@ -208,7 +231,8 @@ export default function CourseDetail() {
                   <h2 className="font-display font-600 text-base text-[var(--text-base)] truncate">{activeLesson.title}</h2>
                   <p className="text-xs text-ink-400 mt-0.5">{activeLesson.moduleTitle}</p>
                 </div>
-                {enrolled && (
+                {/* Mark done — auth only */}
+                {isAuth && enrolled ? (
                   <button onClick={() => toggleLesson(activeLesson)}
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 flex-shrink-0
                       ${progress[activeLesson.id]
@@ -217,8 +241,15 @@ export default function CourseDetail() {
                       }`}>
                     {progress[activeLesson.id] ? <><CheckCircle size={13} /> Done</> : <><Circle size={13} /> Mark done</>}
                   </button>
-                )}
+                ) : !isAuth ? (
+                  <Link to={signupUrl}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-ember-500/30 text-ember-400 hover:bg-ember-500/10 transition-all flex-shrink-0">
+                    <UserPlus size={12} /> Sign up to track
+                  </Link>
+                ) : null}
               </div>
+
+              {/* Prev / Next */}
               <div className="flex items-center gap-2">
                 <button onClick={() => prevLesson && goToLesson(prevLesson)} disabled={!prevLesson}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-[var(--border-mid)] text-ink-300 hover:border-[var(--border-hi)] hover:text-ink-100 transition-all disabled:opacity-30 disabled:cursor-not-allowed">
@@ -290,7 +321,7 @@ export default function CourseDetail() {
                   </div>
                   <div className="space-y-3 mb-5">
                     {replies.length === 0
-                      ? <p className="text-xs text-ink-500 py-4">No replies yet. Be the first!</p>
+                      ? <p className="text-xs text-ink-500 py-4">No replies yet.</p>
                       : replies.map((reply, i) => (
                           <div key={reply.id ?? i} className="flex gap-3">
                             <CornerDownRight size={14} className="text-ink-600 flex-shrink-0 mt-4" />
@@ -302,27 +333,41 @@ export default function CourseDetail() {
                         ))
                     }
                   </div>
-                  <div className="card p-4 border-[var(--border-mid)]">
-                    <textarea value={newReply} onChange={e => setNewReply(e.target.value)}
-                      placeholder="Write a reply…" rows={3} className="input-field text-sm resize-none mb-3" />
-                    <button onClick={postReply} disabled={replyPosting || !newReply.trim()} className="btn-primary text-sm">
-                      {replyPosting ? 'Posting…' : <><Send size={13} /> Reply</>}
-                    </button>
-                  </div>
+                  {/* Reply form — auth only */}
+                  {isAuth ? (
+                    <div className="card p-4 border-[var(--border-mid)]">
+                      <textarea value={newReply} onChange={e => setNewReply(e.target.value)}
+                        placeholder="Write a reply…" rows={3} className="input-field text-sm resize-none mb-3" />
+                      <button onClick={postReply} disabled={replyPosting || !newReply.trim()} className="btn-primary text-sm">
+                        {replyPosting ? 'Posting…' : <><Send size={13} /> Reply</>}
+                      </button>
+                    </div>
+                  ) : (
+                    <Link to={signupUrl} className="card flex items-center justify-center gap-2 p-4 border-dashed text-sm text-ember-400 hover:border-ember-500/30 transition-colors">
+                      <UserPlus size={15} /> Sign up to reply
+                    </Link>
+                  )}
                 </div>
               ) : (
                 <div>
-                  <div className="card p-5 border-[var(--border-mid)] mb-5">
-                    <h3 className="font-display font-600 text-sm mb-3">Start a discussion</h3>
-                    <input value={newPost.title} onChange={e => setNewPost(p => ({...p, title:e.target.value}))}
-                      placeholder="Discussion title…" className="input-field mb-3 text-sm" />
-                    <textarea value={newPost.content} onChange={e => setNewPost(p => ({...p, content:e.target.value}))}
-                      placeholder="Share thoughts, questions, or resources…"
-                      rows={3} className="input-field mb-3 text-sm resize-none" />
-                    <button onClick={postDiscussion} disabled={posting || !newPost.title.trim()} className="btn-primary text-sm">
-                      {posting ? 'Posting…' : <><Send size={13} /> Post</>}
-                    </button>
-                  </div>
+                  {/* New discussion — auth only */}
+                  {isAuth ? (
+                    <div className="card p-5 border-[var(--border-mid)] mb-5">
+                      <h3 className="font-display font-600 text-sm mb-3">Start a discussion</h3>
+                      <input value={newPost.title} onChange={e => setNewPost(p => ({...p, title:e.target.value}))}
+                        placeholder="Discussion title…" className="input-field mb-3 text-sm" />
+                      <textarea value={newPost.content} onChange={e => setNewPost(p => ({...p, content:e.target.value}))}
+                        placeholder="Share thoughts, questions, or resources…"
+                        rows={3} className="input-field mb-3 text-sm resize-none" />
+                      <button onClick={postDiscussion} disabled={posting || !newPost.title.trim()} className="btn-primary text-sm">
+                        {posting ? 'Posting…' : <><Send size={13} /> Post</>}
+                      </button>
+                    </div>
+                  ) : (
+                    <Link to={signupUrl} className="card flex items-center justify-center gap-2 p-5 border-dashed text-sm text-ember-400 hover:border-ember-500/30 transition-colors mb-5">
+                      <UserPlus size={15} /> Sign up to post a discussion
+                    </Link>
+                  )}
                   {discussions.length === 0
                     ? <div className="text-center py-10"><MessageSquare size={28} className="text-ink-600 mx-auto mb-3" /><p className="text-ink-400 text-sm">No discussions yet.</p></div>
                     : discussions.map(d => (
@@ -348,9 +393,14 @@ export default function CourseDetail() {
           <div className="p-5 border-b border-[var(--border)] sticky top-0 bg-[var(--bg-raised)] z-10">
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-display font-600 text-sm">Course content</h3>
-              <span className="text-xs text-ink-400">{completedCount}/{totalLessons}</span>
+              <span className="text-xs text-ink-400">{isAuth ? `${completedCount}/${totalLessons}` : `${totalLessons} lessons`}</span>
             </div>
-            <div className="progress-bar"><div className="progress-fill" style={{ width:`${pct}%` }} /></div>
+            {isAuth
+              ? <div className="progress-bar"><div className="progress-fill" style={{ width:`${pct}%` }} /></div>
+              : <Link to={signupUrl} className="btn-primary w-full justify-center mt-2 text-xs py-2 gap-1.5">
+                  <UserPlus size={13} /> Sign up to track progress
+                </Link>
+            }
           </div>
           <div className="flex-1 overflow-y-auto">
             {course.modules?.map((mod, mi) => (
