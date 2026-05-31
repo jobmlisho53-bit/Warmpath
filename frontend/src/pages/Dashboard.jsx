@@ -16,14 +16,18 @@ function num(val) {
 }
 
 export default function Dashboard() {
-  const { user } = useAuth()
+  const { user, session } = useAuth()
   const [stats,       setStats]       = useState(null)
   const [enrollments, setEnrollments] = useState([])
   const [courses,     setCourses]     = useState({})
   const [loading,     setLoading]     = useState(true)
 
   useEffect(() => {
+    // Wait for session to be ready before firing API calls
+    if (!session?.access_token) return
+
     async function load() {
+      setLoading(true)
       try {
         const [statsRes, enrRes, coursesRes] = await Promise.allSettled([
           api.get('/gamification/stats'),
@@ -31,7 +35,9 @@ export default function Dashboard() {
           api.get('/courses'),
         ])
 
-        if (statsRes.status === 'fulfilled') setStats(statsRes.value.data)
+        if (statsRes.status === 'fulfilled') {
+          setStats(statsRes.value.data)
+        }
 
         if (coursesRes.status === 'fulfilled') {
           const all  = coursesRes.value.data
@@ -42,7 +48,7 @@ export default function Dashboard() {
         }
 
         if (enrRes.status === 'fulfilled') {
-          const raw  = enrRes.value.data
+          const raw = enrRes.value.data
           let list = []
           if (Array.isArray(raw))                  list = raw
           else if (Array.isArray(raw.enrollments)) list = raw.enrollments
@@ -54,8 +60,9 @@ export default function Dashboard() {
         setLoading(false)
       }
     }
+
     load()
-  }, [])
+  }, [session?.access_token]) // only fires once session token exists
 
   const displayName = user?.user_metadata?.full_name
     || user?.user_metadata?.name
@@ -69,13 +76,23 @@ export default function Dashboard() {
   const badgeList = Array.isArray(stats?.badges) ? stats.badges : []
 
   const statCards = [
-    { icon: Zap,      label: 'Total XP',      value: xp.toLocaleString(),                       color: 'text-ember-400', bg: 'bg-ember-500/10 border-ember-500/20' },
-    { icon: Flame,    label: 'Day Streak',     value: `${streak} day${streak !== 1 ? 's' : ''}`, color: 'text-terra-400', bg: 'bg-terra-500/10 border-terra-500/20' },
-    { icon: Trophy,   label: 'Level',          value: `Level ${level}`,                          color: 'text-sand-400',  bg: 'bg-sand-500/10 border-sand-500/20'   },
-    { icon: Award,    label: 'Certificates',   value: certs,                                     color: 'text-sage-400',  bg: 'bg-sage-500/10 border-sage-500/20'   },
-    { icon: BookOpen, label: 'Courses Joined', value: enrollments.length,                        color: 'text-ember-400', bg: 'bg-ember-500/10 border-ember-500/20' },
-    { icon: Star,     label: 'Badges',         value: badgeList.length,                          color: 'text-terra-400', bg: 'bg-terra-500/10 border-terra-500/20' },
+    { icon: Zap,      label: 'Total XP',      value: xp.toLocaleString(),                        color: 'text-ember-400', bg: 'bg-ember-500/10 border-ember-500/20' },
+    { icon: Flame,    label: 'Day Streak',     value: `${streak} day${streak !== 1 ? 's' : ''}`,  color: 'text-terra-400', bg: 'bg-terra-500/10 border-terra-500/20' },
+    { icon: Trophy,   label: 'Level',          value: `Level ${level}`,                           color: 'text-sand-400',  bg: 'bg-sand-500/10 border-sand-500/20'   },
+    { icon: Award,    label: 'Certificates',   value: certs,                                      color: 'text-sage-400',  bg: 'bg-sage-500/10 border-sage-500/20'   },
+    { icon: BookOpen, label: 'Courses Joined', value: enrollments.length,                         color: 'text-ember-400', bg: 'bg-ember-500/10 border-ember-500/20' },
+    { icon: Star,     label: 'Badges',         value: badgeList.length,                           color: 'text-terra-400', bg: 'bg-terra-500/10 border-terra-500/20' },
   ]
+
+  // Still waiting for session to arrive
+  if (!session?.access_token) return (
+    <div className="min-h-screen pt-24 flex items-center justify-center">
+      <div className="flex flex-col items-center gap-4">
+        <div className="w-10 h-10 rounded-full border-2 border-ember-500 border-t-transparent animate-spin" />
+        <p className="text-ink-400 text-sm">Loading your dashboard…</p>
+      </div>
+    </div>
+  )
 
   return (
     <div className="min-h-screen pt-24 pb-16">
