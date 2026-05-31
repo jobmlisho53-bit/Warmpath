@@ -1,7 +1,10 @@
 import axios from 'axios'
 import { supabase } from './supabase'
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'https://warmpath-seven.vercel.app/api'
+// Production uses real URL; dev uses Vite proxy
+const BASE_URL = import.meta.env.PROD 
+  ? 'https://warmpath-seven.vercel.app/api'
+  : '/api'
 
 const api = axios.create({ baseURL: BASE_URL })
 
