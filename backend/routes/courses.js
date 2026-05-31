@@ -2,17 +2,42 @@ const express = require('express')
 const router = express.Router()
 const supabaseAdmin = require('../supabaseAdmin')
 
-// Get user enrollments — SIMPLE VERSION, no nested progress
+// Get user enrollments — NO JOINS, two fast queries
 router.get('/user/enrollments', async (req, res) => {
   const userId = req.user.id
 
-  const { data, error } = await supabaseAdmin
-    .from('enrollments')
-    .select('*, course:courses(id, title, category, cover_image)')
-    .eq('user_id', userId)
+  try {
+    // Query 1: Get enrollment IDs and course_ids (fast, no join)
+    const { data: enrollments, error: enrError } = await supabaseAdmin
+      .from('enrollments')
+      .select('id, user_id, course_id, enrolled_at')
+      .eq('user_id', userId)
 
-  if (error) return res.status(500).json({ error: error.message })
-  res.json(data)
+    if (enrError) return res.status(500).json({ error: enrError.message })
+    if (!enrollments || enrollments.length === 0) return res.json([])
+
+    // Query 2: Get all course details in one batch (fast, single query)
+    const courseIds = enrollments.map(e => e.course_id)
+    const { data: courses, error: courseError } = await supabaseAdmin
+      .from('courses')
+      .select('id, title, category, cover_image')
+      .in('id', courseIds)
+
+    if (courseError) return res.status(500).json({ error: courseError.message })
+
+    // Combine them
+    const courseMap = {}
+    courses.forEach(c => { courseMap[c.id] = c })
+
+    const result = enrollments.map(enr => ({
+      ...enr,
+      course: courseMap[enr.course_id] || null
+    }))
+
+    res.json(result)
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' })
+  }
 })
 
 // Get all published courses
@@ -24,10 +49,10 @@ router.get('/', async (req, res) => {
     .order('created_at', { ascending: false })
 
   if (error) return res.status(500).json({ error: error.message })
-  res.json(courses)
+  res.json(courses || [])
 })
 
-// Get single course with modules and lessons
+// Get single course
 router.get('/:id', async (req, res) => {
   const { data: course, error } = await supabaseAdmin
     .from('courses')
@@ -39,21 +64,17 @@ router.get('/:id', async (req, res) => {
   if (!course) return res.status(404).json({ error: 'Course not found' })
 
   course.modules.sort((a, b) => a.order_index - b.order_index)
-  course.modules.forEach(m => {
-    m.lessons.sort((a, b) => a.order_index - b.order_index)
-  })
+  course.modules.forEach(m => m.lessons.sort((a, b) => a.order_index - b.order_index))
 
   res.json(course)
 })
 
-// Enroll in a course
+// Enroll
 router.post('/:id/enroll', async (req, res) => {
   const userId = req.user.id
-  const courseId = req.params.id
-
   const { data, error } = await supabaseAdmin
     .from('enrollments')
-    .upsert({ user_id: userId, course_id: courseId })
+    .upsert({ user_id: userId, course_id: req.params.id })
     .select()
     .single()
 
