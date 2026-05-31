@@ -2,16 +2,13 @@ const express = require('express')
 const router = express.Router()
 const supabaseAdmin = require('../supabaseAdmin')
 
-// IMPORTANT: /user/enrollments MUST come before /:id
-// Otherwise Express treats "user" as an :id parameter
-
-// Get user enrollments — MUST BE FIRST
+// Get user enrollments — SIMPLE VERSION, no nested progress
 router.get('/user/enrollments', async (req, res) => {
   const userId = req.user.id
 
   const { data, error } = await supabaseAdmin
     .from('enrollments')
-    .select('*, course:courses(*)')
+    .select('*, course:courses(id, title, category, cover_image)')
     .eq('user_id', userId)
 
   if (error) return res.status(500).json({ error: error.message })
