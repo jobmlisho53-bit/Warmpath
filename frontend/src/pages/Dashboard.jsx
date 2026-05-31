@@ -16,16 +16,13 @@ function num(val) {
 }
 
 export default function Dashboard() {
-  const { user, session } = useAuth()
+  const { user } = useAuth()
   const [stats,       setStats]       = useState(null)
   const [enrollments, setEnrollments] = useState([])
   const [courses,     setCourses]     = useState({})
   const [loading,     setLoading]     = useState(true)
 
   useEffect(() => {
-    // Wait for session to be ready before firing API calls
-    if (!session?.access_token) return
-
     async function load() {
       setLoading(true)
       try {
@@ -62,7 +59,7 @@ export default function Dashboard() {
     }
 
     load()
-  }, [session?.access_token]) // only fires once session token exists
+  }, []) // Run once on mount — api interceptor handles auth
 
   const displayName = user?.user_metadata?.full_name
     || user?.user_metadata?.name
@@ -84,8 +81,7 @@ export default function Dashboard() {
     { icon: Star,     label: 'Badges',         value: badgeList.length,                           color: 'text-terra-400', bg: 'bg-terra-500/10 border-terra-500/20' },
   ]
 
-  // Still waiting for session to arrive
-  if (!session?.access_token) return (
+  if (loading) return (
     <div className="min-h-screen pt-24 flex items-center justify-center">
       <div className="flex flex-col items-center gap-4">
         <div className="w-10 h-10 rounded-full border-2 border-ember-500 border-t-transparent animate-spin" />
