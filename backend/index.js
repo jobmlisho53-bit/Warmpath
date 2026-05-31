@@ -19,9 +19,16 @@ const { router: adminAuthRouter, adminAuthMiddleware } = require('./routes/admin
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// UPDATED: Allow all origins for development. 
-// We removed 'credentials: true' because we use JWT Bearer tokens, not cookies.
-app.use(cors()); 
+// CORS — allow Vercel domains + localhost
+app.use(cors({
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'https://warmpath.vercel.app',
+    'https://warmpath-api.vercel.app'
+  ],
+  credentials: true
+}));
 app.use(express.json());
 
 app.use((req, res, next) => {
@@ -56,7 +63,7 @@ app.get('/api/shop/products/:id', (req, res) => {
     });
 });
 
-// Protected routes (student auth)
+// Student routes
 app.use('/api/courses', authMiddleware, coursesRouter);
 app.use('/api/progress', authMiddleware, progressRouter);
 app.use('/api/payments', authMiddleware, paymentsRouter);
@@ -65,7 +72,7 @@ app.use('/api/gamification', authMiddleware, gamificationRouter);
 app.use('/api/community', authMiddleware, communityRouter);
 app.use('/api/shop', authMiddleware, shopRouter);
 
-// Admin protected routes (admin auth)
+// Admin routes
 app.use('/api/admin', adminAuthMiddleware, adminRouter);
 app.use('/api/admin/shop', adminAuthMiddleware, adminShopRouter);
 
@@ -76,3 +83,5 @@ app.get('/', (req, res) => {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+module.exports = app;
