@@ -19,13 +19,13 @@ const { router: adminAuthRouter, adminAuthMiddleware } = require('./routes/admin
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// CORS — allow Vercel domains + localhost
 app.use(cors({
   origin: [
     'http://localhost:5173',
     'http://localhost:3000',
     'https://warmpath.vercel.app',
-    'https://warmpath-api.vercel.app'
+    'https://warmpath-three.vercel.app',
+    'https://warmpath-seven.vercel.app'
   ],
   credentials: true
 }));
