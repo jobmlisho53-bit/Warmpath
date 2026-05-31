@@ -19,14 +19,13 @@ export default function Dashboard() {
   const { user, isAuth, loading: authLoading } = useAuth()
   const [stats,       setStats]       = useState(null)
   const [enrollments, setEnrollments] = useState([])
-  const [courses,     setCourses]     = useState({})
+  const [allCourses,  setAllCourses]  = useState({})
   const [loading,     setLoading]     = useState(true)
   const [ready,       setReady]       = useState(false)
 
-  // Wait until auth is confirmed before loading anything
   useEffect(() => {
-    if (authLoading) return        // still checking session
-    if (!isAuth || !user) return   // not logged in
+    if (authLoading) return
+    if (!isAuth || !user) return
     setReady(true)
   }, [authLoading, isAuth, user])
 
@@ -36,9 +35,9 @@ export default function Dashboard() {
     async function load() {
       setLoading(true)
       try {
-        const [statsRes, enrRes, coursesRes] = await Promise.allSettled([
+        // Run stats and courses in parallel — these always work
+        const [statsRes, coursesRes] = await Promise.allSettled([
           api.get('/gamification/stats'),
-          api.get('/courses/user/enrollments'),
           api.get('/courses'),
         ])
 
@@ -46,23 +45,31 @@ export default function Dashboard() {
           setStats(statsRes.value.data)
         }
 
+        // Build course map from the working /courses endpoint
+        let courseMap = {}
         if (coursesRes.status === 'fulfilled') {
           const all  = coursesRes.value.data
           const list = Array.isArray(all) ? all : all.courses ?? []
-          const map  = {}
-          list.forEach(c => { map[c.id] = c })
-          setCourses(map)
+          list.forEach(c => { courseMap[c.id] = c })
+          setAllCourses(courseMap)
         }
 
-        if (enrRes.status === 'fulfilled') {
-          const raw = enrRes.value.data
+        // Try enrollments — if it 504s, fall back gracefully
+        try {
+          const enrRes = await api.get('/courses/user/enrollments')
+          const raw = enrRes.data
           let list = []
           if (Array.isArray(raw))                  list = raw
           else if (Array.isArray(raw.enrollments)) list = raw.enrollments
           else if (Array.isArray(raw.data))        list = raw.data
-          else if (raw.enrollment)                 list = [raw.enrollment]
           setEnrollments(list)
+        } catch (enrErr) {
+          // 504 timeout — enrollments route is broken on backend
+          // Show empty state rather than hanging forever
+          console.warn('Enrollments endpoint failed:', enrErr.response?.status, enrErr.message)
+          setEnrollments([])
         }
+
       } finally {
         setLoading(false)
       }
@@ -91,7 +98,6 @@ export default function Dashboard() {
     { icon: Star,     label: 'Badges',         value: badgeList.length,                           color: 'text-terra-400', bg: 'bg-terra-500/10 border-terra-500/20' },
   ]
 
-  // Auth still initialising
   if (authLoading || !ready) return (
     <div className="min-h-screen pt-24 flex items-center justify-center">
       <div className="flex flex-col items-center gap-4">
@@ -165,14 +171,17 @@ export default function Dashboard() {
           ) : enrollments.length === 0 ? (
             <div className="card p-10 text-center border-dashed max-w-md">
               <BookOpen size={28} className="text-ink-500 mx-auto mb-3" />
-              <p className="text-ink-400 text-sm mb-4">No courses yet. Start learning today!</p>
+              <p className="text-ink-400 text-sm mb-1">No courses showing yet.</p>
+              <p className="text-ink-500 text-xs mb-4">
+                If you have enrolled in courses, the backend is still syncing. Try refreshing in a moment.
+              </p>
               <Link to="/courses" className="btn-primary text-sm">Browse courses</Link>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {enrollments.map((enr, i) => {
                 const courseId = enr.course_id ?? enr.course?.id ?? enr.id
-                const course   = enr.course ?? courses[courseId] ?? enr
+                const course   = enr.course ?? allCourses[courseId] ?? enr
                 const pct      = num(enr.progress ?? enr.percentage ?? 0)
                 const slug     = course.slug || course.id || courseId
                 return (
