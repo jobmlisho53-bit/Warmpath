@@ -2,7 +2,23 @@ const express = require('express')
 const router = express.Router()
 const supabaseAdmin = require('../supabaseAdmin')
 
-// Get all published courses with module count
+// IMPORTANT: /user/enrollments MUST come before /:id
+// Otherwise Express treats "user" as an :id parameter
+
+// Get user enrollments — MUST BE FIRST
+router.get('/user/enrollments', async (req, res) => {
+  const userId = req.user.id
+
+  const { data, error } = await supabaseAdmin
+    .from('enrollments')
+    .select('*, course:courses(*)')
+    .eq('user_id', userId)
+
+  if (error) return res.status(500).json({ error: error.message })
+  res.json(data)
+})
+
+// Get all published courses
 router.get('/', async (req, res) => {
   const { data: courses, error } = await supabaseAdmin
     .from('courses')
@@ -25,7 +41,6 @@ router.get('/:id', async (req, res) => {
   if (error) return res.status(500).json({ error: error.message })
   if (!course) return res.status(404).json({ error: 'Course not found' })
 
-  // Sort modules and lessons by order_index
   course.modules.sort((a, b) => a.order_index - b.order_index)
   course.modules.forEach(m => {
     m.lessons.sort((a, b) => a.order_index - b.order_index)
@@ -44,19 +59,6 @@ router.post('/:id/enroll', async (req, res) => {
     .upsert({ user_id: userId, course_id: courseId })
     .select()
     .single()
-
-  if (error) return res.status(500).json({ error: error.message })
-  res.json(data)
-})
-
-// Get user enrollments
-router.get('/user/enrollments', async (req, res) => {
-  const userId = req.user.id
-
-  const { data, error } = await supabaseAdmin
-    .from('enrollments')
-    .select('*, course:courses(*)')
-    .eq('user_id', userId)
 
   if (error) return res.status(500).json({ error: error.message })
   res.json(data)
