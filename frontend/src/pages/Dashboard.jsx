@@ -22,6 +22,7 @@ export default function Dashboard() {
   const [allCourses,  setAllCourses]  = useState({})
   const [loading,     setLoading]     = useState(true)
   const [ready,       setReady]       = useState(false)
+  const [diagnostics, setDiagnostics] = useState([])
 
   useEffect(() => {
     if (authLoading) return
@@ -34,45 +35,60 @@ export default function Dashboard() {
 
     async function load() {
       setLoading(true)
+      const log = []
+
+      log.push(`Auth ready. user.id = ${user?.id}`)
+      log.push(`isAuth = ${isAuth}, authLoading = ${authLoading}`)
+
+      // ── 1. Gamification stats ──
       try {
-        // Run stats and courses in parallel — these always work
-        const [statsRes, coursesRes] = await Promise.allSettled([
-          api.get('/gamification/stats'),
-          api.get('/courses'),
-        ])
-
-        if (statsRes.status === 'fulfilled') {
-          setStats(statsRes.value.data)
-        }
-
-        // Build course map from the working /courses endpoint
-        let courseMap = {}
-        if (coursesRes.status === 'fulfilled') {
-          const all  = coursesRes.value.data
-          const list = Array.isArray(all) ? all : all.courses ?? []
-          list.forEach(c => { courseMap[c.id] = c })
-          setAllCourses(courseMap)
-        }
-
-        // Try enrollments — if it 504s, fall back gracefully
-        try {
-          const enrRes = await api.get('/courses/user/enrollments')
-          const raw = enrRes.data
-          let list = []
-          if (Array.isArray(raw))                  list = raw
-          else if (Array.isArray(raw.enrollments)) list = raw.enrollments
-          else if (Array.isArray(raw.data))        list = raw.data
-          setEnrollments(list)
-        } catch (enrErr) {
-          // 504 timeout — enrollments route is broken on backend
-          // Show empty state rather than hanging forever
-          console.warn('Enrollments endpoint failed:', enrErr.response?.status, enrErr.message)
-          setEnrollments([])
-        }
-
-      } finally {
-        setLoading(false)
+        log.push('Calling /gamification/stats...')
+        const r = await api.get('/gamification/stats')
+        log.push(`/gamification/stats → ${r.status} — ${JSON.stringify(r.data).slice(0, 120)}`)
+        setStats(r.data)
+      } catch (e) {
+        log.push(`/gamification/stats FAILED → ${e.response?.status} ${e.message}`)
       }
+
+      // ── 2. All courses ──
+      try {
+        log.push('Calling /courses...')
+        const r = await api.get('/courses')
+        const list = Array.isArray(r.data) ? r.data : r.data.courses ?? []
+        const map = {}
+        list.forEach(c => { map[c.id] = c })
+        setAllCourses(map)
+        log.push(`/courses → ${r.status} — ${list.length} courses loaded`)
+      } catch (e) {
+        log.push(`/courses FAILED → ${e.response?.status} ${e.message}`)
+      }
+
+      // ── 3. Enrollments ──
+      try {
+        log.push('Calling /courses/user/enrollments...')
+        const controller = new AbortController()
+        const timeout    = setTimeout(() => controller.abort(), 8000)
+        const r = await api.get('/courses/user/enrollments', { signal: controller.signal })
+        clearTimeout(timeout)
+        const raw = r.data
+        let list = []
+        if (Array.isArray(raw))                  list = raw
+        else if (Array.isArray(raw.enrollments)) list = raw.enrollments
+        else if (Array.isArray(raw.data))        list = raw.data
+        setEnrollments(list)
+        log.push(`/courses/user/enrollments → ${r.status} — ${list.length} enrollments`)
+      } catch (e) {
+        if (e.name === 'AbortError' || e.name === 'CanceledError') {
+          log.push('/courses/user/enrollments TIMED OUT after 8s — backend 504')
+        } else {
+          log.push(`/courses/user/enrollments FAILED → ${e.response?.status} ${e.message}`)
+        }
+        setEnrollments([])
+      }
+
+      log.push('load() complete — setting loading=false')
+      setDiagnostics(log)
+      setLoading(false)
     }
 
     load()
@@ -112,7 +128,7 @@ export default function Dashboard() {
       <div className="page-container">
 
         {/* Greeting */}
-        <div className="mb-10 animate-fade-up">
+        <div className="mb-8 animate-fade-up">
           <div className="flex items-center gap-4">
             <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-white font-display text-xl font-700 flex-shrink-0"
               style={{ background:'linear-gradient(135deg,#F07A1A,#C85528)', boxShadow:'0 0 0 1px rgba(240,122,26,0.2),0 8px 24px -4px rgba(240,122,26,0.3)' }}>
@@ -123,12 +139,31 @@ export default function Dashboard() {
                 Welcome back, {displayName.split(' ')[0]}
               </h1>
               <p className="text-sm text-ink-400 mt-0.5">
-                {streak > 0
-                  ? `${streak}-day streak — keep it going`
-                  : 'Complete a lesson today to start your streak'}
+                {streak > 0 ? `${streak}-day streak — keep it going` : 'Complete a lesson today to start your streak'}
               </p>
             </div>
           </div>
+        </div>
+
+        {/* ── DIAGNOSTIC PANEL ── */}
+        <div className="mb-8 card border-sand-500/30 bg-sand-500/5 p-4">
+          <p className="text-xs font-mono font-medium text-sand-400 uppercase tracking-wide mb-3">
+            Diagnostic — loading: {String(loading)} · ready: {String(ready)}
+          </p>
+          {diagnostics.length === 0 ? (
+            <p className="text-xs font-mono text-ink-400">Waiting for load() to run…</p>
+          ) : (
+            <div className="space-y-1">
+              {diagnostics.map((line, i) => (
+                <p key={i} className={`text-xs font-mono leading-relaxed
+                  ${line.includes('FAILED') || line.includes('TIMED OUT') ? 'text-red-400' :
+                    line.includes('→ 2') || line.includes('complete') ? 'text-sage-400' :
+                    'text-ink-300'}`}>
+                  {line}
+                </p>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Stat cards */}
@@ -153,9 +188,7 @@ export default function Dashboard() {
         <div className="mb-10">
           <div className="flex items-center justify-between mb-5">
             <h2 className="font-display text-xl font-700">Your courses</h2>
-            <Link to="/courses" className="btn-ghost text-sm gap-1.5">
-              Browse more <ArrowRight size={14} />
-            </Link>
+            <Link to="/courses" className="btn-ghost text-sm gap-1.5">Browse more <ArrowRight size={14} /></Link>
           </div>
 
           {loading ? (
@@ -171,10 +204,7 @@ export default function Dashboard() {
           ) : enrollments.length === 0 ? (
             <div className="card p-10 text-center border-dashed max-w-md">
               <BookOpen size={28} className="text-ink-500 mx-auto mb-3" />
-              <p className="text-ink-400 text-sm mb-1">No courses showing yet.</p>
-              <p className="text-ink-500 text-xs mb-4">
-                If you have enrolled in courses, the backend is still syncing. Try refreshing in a moment.
-              </p>
+              <p className="text-ink-400 text-sm mb-4">No courses yet.</p>
               <Link to="/courses" className="btn-primary text-sm">Browse courses</Link>
             </div>
           ) : (
@@ -185,10 +215,8 @@ export default function Dashboard() {
                 const pct      = num(enr.progress ?? enr.percentage ?? 0)
                 const slug     = course.slug || course.id || courseId
                 return (
-                  <Link key={enr.id ?? i}
-                    to={`/courses/${slug}`}
-                    className="card-hover p-5 group"
-                    style={{ animationDelay:`${i*60}ms` }}>
+                  <Link key={enr.id ?? i} to={`/courses/${slug}`}
+                    className="card-hover p-5 group" style={{ animationDelay:`${i*60}ms` }}>
                     <div className="flex items-start gap-3 mb-4">
                       <div className="w-11 h-11 rounded-xl border border-[var(--border-mid)] flex items-center justify-center text-xl flex-shrink-0"
                         style={{ background:'linear-gradient(135deg,rgba(240,122,26,0.1),rgba(200,85,40,0.1))' }}>
@@ -217,13 +245,12 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Badges */}
         {badgeList.length > 0 && (
           <div className="animate-fade-up">
             <h2 className="font-display text-xl font-700 mb-5">Badges earned</h2>
             <div className="flex flex-wrap gap-3">
               {badgeList.map((b, i) => (
-                <div key={b.id ?? i} className="card px-4 py-3 flex items-center gap-3 border-[var(--border-mid)] hover:border-ember-500/20 transition-colors">
+                <div key={b.id ?? i} className="card px-4 py-3 flex items-center gap-3 border-[var(--border-mid)]">
                   <div className="w-9 h-9 rounded-lg bg-ember-500/10 border border-ember-500/20 flex items-center justify-center flex-shrink-0">
                     <Star size={16} className="text-ember-400" />
                   </div>
