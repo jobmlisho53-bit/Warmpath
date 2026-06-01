@@ -36,26 +36,13 @@ app.use((req, res, next) => {
   next();
 });
 
-// ============================================
-// PUBLIC ROUTES — No auth required
-// ============================================
-
-// YouTube metadata
+// Public routes
 app.use('/api/youtube', youtubeRouter);
-
-// Certificate verification
 app.use('/api/certificates/verify', certificatesRouter);
-
-// Public profiles & leaderboard
 app.use('/api/profiles/public', profilesRouter);
-
-// Admin auth
 app.use('/api/admin/auth', adminAuthRouter);
 
-// Courses — public for guest browsing
-app.use('/api/courses', coursesRouter);
-
-// Shop products — public
+// Shop public
 app.get('/api/shop/products', (req, res) => {
   const supabaseAdmin = require('./supabaseAdmin');
   const { category } = req.query;
@@ -67,22 +54,18 @@ app.get('/api/shop/products', (req, res) => {
   });
 });
 
-app.get('/api/shop/products/:id', (req, res) => {
-  const supabaseAdmin = require('./supabaseAdmin');
-  supabaseAdmin.from('shop_products').select('*').eq('id', req.params.id).single()
-    .then(({ data, error }) => {
-      if (error) return res.status(500).json({ error: error.message });
-      res.json(data);
-    });
+// Courses — public for browsing, but /user/enrollments needs auth
+app.get('/api/courses/user/enrollments', authMiddleware, (req, res, next) => {
+  req.url = '/user/enrollments';
+  coursesRouter(req, res, next);
 });
 
-// Community discussions — public read-only
+app.use('/api/courses', coursesRouter);
+
+// Community public read
 app.get('/api/community/courses/:courseId/discussions', (req, res) => {
   const supabaseAdmin = require('./supabaseAdmin');
-  supabaseAdmin
-    .from('discussions')
-    .select('*')
-    .eq('course_id', req.params.courseId)
+  supabaseAdmin.from('discussions').select('*').eq('course_id', req.params.courseId)
     .order('created_at', { ascending: false })
     .then(({ data, error }) => {
       if (error) return res.status(500).json({ error: error.message });
@@ -90,55 +73,16 @@ app.get('/api/community/courses/:courseId/discussions', (req, res) => {
     });
 });
 
-app.get('/api/community/discussions/:id', (req, res) => {
-  const supabaseAdmin = require('./supabaseAdmin');
-  supabaseAdmin
-    .from('discussions')
-    .select('*')
-    .eq('id', req.params.id)
-    .single()
-    .then(async ({ data: discussion, error }) => {
-      if (error) return res.status(500).json({ error: error.message });
-      const { data: replies } = await supabaseAdmin
-        .from('replies')
-        .select('*')
-        .eq('discussion_id', req.params.id)
-        .order('created_at', { ascending: true });
-      res.json({ ...discussion, replies: replies || [] });
-    });
-});
-
-// ============================================
-// PROTECTED ROUTES — Auth required
-// ============================================
-
-// Progress tracking
+// Protected routes
 app.use('/api/progress', authMiddleware, progressRouter);
-
-// Payments
 app.use('/api/payments', authMiddleware, paymentsRouter);
-
-// Certificates (user's own)
 app.use('/api/certificates', authMiddleware, certificatesRouter);
-
-// Gamification
 app.use('/api/gamification', authMiddleware, gamificationRouter);
-
-// Community write actions
-app.post('/api/community/courses/:courseId/discussions', authMiddleware, (req, res, next) => {
-  req.url = `/courses/${req.params.courseId}/discussions`;
-  communityRouter(req, res, next);
-});
-
-app.post('/api/community/discussions/:id/replies', authMiddleware, (req, res, next) => {
-  req.url = `/discussions/${req.params.id}/replies`;
-  communityRouter(req, res, next);
-});
-
-// Shop cart, checkout, downloads
+app.post('/api/community/courses/:courseId/discussions', authMiddleware, communityRouter);
+app.post('/api/community/discussions/:id/replies', authMiddleware, communityRouter);
 app.use('/api/shop', authMiddleware, shopRouter);
 
-// Admin routes
+// Admin
 app.use('/api/admin', adminAuthMiddleware, adminRouter);
 app.use('/api/admin/shop', adminAuthMiddleware, adminShopRouter);
 
