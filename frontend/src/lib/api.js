@@ -1,7 +1,7 @@
 import axios from 'axios'
 import { supabase } from './supabase'
 
-const BASE_URL = 'https://warmpath-zy6w.onrender.com/api'
+const BASE_URL = 'https://warmpath-seven.vercel.app/api'
 
 const api = axios.create({ baseURL: BASE_URL })
 
