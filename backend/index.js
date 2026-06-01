@@ -54,12 +54,11 @@ app.get('/api/shop/products', (req, res) => {
   });
 });
 
-// Courses — public for browsing, but /user/enrollments needs auth
+// Courses — public, but enrollments needs auth
 app.get('/api/courses/user/enrollments', authMiddleware, (req, res, next) => {
   req.url = '/user/enrollments';
   coursesRouter(req, res, next);
 });
-
 app.use('/api/courses', coursesRouter);
 
 // Community public read
@@ -86,7 +85,12 @@ app.use('/api/shop', authMiddleware, shopRouter);
 app.use('/api/admin', adminAuthMiddleware, adminRouter);
 app.use('/api/admin/shop', adminAuthMiddleware, adminShopRouter);
 
+// Root — handles both / and /api
 app.get('/', (req, res) => {
+  res.json({ message: 'WarmPath API is running' });
+});
+
+app.get('/api', (req, res) => {
   res.json({ message: 'WarmPath API is running' });
 });
 
