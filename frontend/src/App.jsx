@@ -25,6 +25,7 @@ import BlogPost          from './pages/BlogPost'
 import AdminLogin        from './pages/AdminLogin'
 import AdminDashboard    from './pages/AdminDashboard'
 import AdminShop         from './pages/AdminShop'
+import PaymentVerify   from './pages/PaymentVerify'
 
 function Protected({ children }) {
   const { isAuth, loading } = useAuth()
@@ -79,6 +80,7 @@ function AppRoutes() {
         <Route path="/admin"                          element={<AdminGuard><AdminDashboard /></AdminGuard>} />
         <Route path="/admin/shop"                     element={<AdminGuard><AdminShop /></AdminGuard>} />
 
+        <Route path="/payment/verify"                    element={<PaymentVerify />} />
         <Route path="*"                               element={<Navigate to="/" replace />} />
       </Routes>
     </>
