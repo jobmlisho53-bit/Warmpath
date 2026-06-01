@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const authMiddleware = require('./middleware/auth');
@@ -36,7 +37,47 @@ app.use((req, res, next) => {
   next();
 });
 
-// Public routes
+// ============================================
+// RATE LIMITING
+// ============================================
+
+// General API limiter — 100 requests per 15 minutes
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { error: 'Too many requests. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Auth limiter — 10 attempts per 15 minutes
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: 'Too many login attempts. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Admin login limiter — 5 attempts per 15 minutes
+const adminLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { error: 'Too many admin login attempts.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Apply general limiter to all API routes
+app.use('/api', generalLimiter);
+
+// Stricter limits for auth routes
+app.use('/api/admin/auth/login', adminLimiter);
+
+// ============================================
+// PUBLIC ROUTES
+// ============================================
+
 app.use('/api/youtube', youtubeRouter);
 app.use('/api/certificates/verify', certificatesRouter);
 app.use('/api/profiles/public', profilesRouter);
@@ -54,7 +95,7 @@ app.get('/api/shop/products', (req, res) => {
   });
 });
 
-// Courses — public, but enrollments needs auth
+// Courses
 app.get('/api/courses/user/enrollments', authMiddleware, (req, res, next) => {
   req.url = '/user/enrollments';
   coursesRouter(req, res, next);
@@ -72,7 +113,10 @@ app.get('/api/community/courses/:courseId/discussions', (req, res) => {
     });
 });
 
-// Protected routes
+// ============================================
+// PROTECTED ROUTES
+// ============================================
+
 app.use('/api/progress', authMiddleware, progressRouter);
 app.use('/api/payments', authMiddleware, paymentsRouter);
 app.use('/api/certificates', authMiddleware, certificatesRouter);
@@ -81,11 +125,17 @@ app.post('/api/community/courses/:courseId/discussions', authMiddleware, communi
 app.post('/api/community/discussions/:id/replies', authMiddleware, communityRouter);
 app.use('/api/shop', authMiddleware, shopRouter);
 
-// Admin
+// ============================================
+// ADMIN ROUTES
+// ============================================
+
 app.use('/api/admin', adminAuthMiddleware, adminRouter);
 app.use('/api/admin/shop', adminAuthMiddleware, adminShopRouter);
 
-// Root — handles both / and /api
+// ============================================
+// ROOT
+// ============================================
+
 app.get('/', (req, res) => {
   res.json({ message: 'WarmPath API is running' });
 });
