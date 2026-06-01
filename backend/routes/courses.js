@@ -2,56 +2,37 @@ const express = require('express')
 const router = express.Router()
 const supabaseAdmin = require('../supabaseAdmin')
 
-// Cache — lives across invocations on warm servers
-let enrollmentsCache = {}
-
-// Fast enrollments using Supabase client + in-memory cache
 router.get('/user/enrollments', async (req, res) => {
   const userId = req.user.id
 
-  try {
-    // Bypass joins entirely — use raw REST queries
-    const { data: enrollments, error } = await supabaseAdmin
-      .from('enrollments')
-      .select('id, user_id, course_id, enrolled_at')
-      .eq('user_id', userId)
-      .limit(50)
+  const { data: enrollments, error } = await supabaseAdmin
+    .from('enrollments')
+    .select('*')
+    .eq('user_id', userId)
 
-    if (error) {
-      console.error('Enrollments error:', error.message)
-      return res.status(500).json({ error: error.message })
-    }
+  if (error) return res.status(500).json({ error: error.message })
+  if (!enrollments?.length) return res.json([])
 
-    if (!enrollments || enrollments.length === 0) return res.json([])
+  const courseIds = enrollments.map(e => e.course_id)
 
-    // Get unique course IDs
-    const courseIds = [...new Set(enrollments.map(e => e.course_id))]
-    
-    // Batch fetch courses
-    const { data: courses } = await supabaseAdmin
-      .from('courses')
-      .select('id, title, category, cover_image')
-      .in('id', courseIds)
+  const { data: courses, error: coursesError } = await supabaseAdmin
+    .from('courses')
+    .select('id, title, category, cover_image')
+    .in('id', courseIds)
 
-    const courseMap = {}
-    if (courses) courses.forEach(c => { courseMap[c.id] = c })
+  if (coursesError) return res.status(500).json({ error: coursesError.message })
 
-    const result = enrollments.map(e => ({
-      ...e,
-      course: courseMap[e.course_id] || null
-    }))
+  const courseMap = {}
+  courses.forEach(c => { courseMap[c.id] = c })
 
-    // Cache for 30 seconds
-    enrollmentsCache[userId] = { data: result, time: Date.now() }
+  const result = enrollments.map(e => ({
+    ...e,
+    course: courseMap[e.course_id] || null
+  }))
 
-    res.json(result)
-  } catch (err) {
-    console.error('Enrollments fatal:', err.message)
-    res.status(500).json({ error: 'Server error' })
-  }
+  res.json(result)
 })
 
-// All courses
 router.get('/', async (req, res) => {
   const { data } = await supabaseAdmin.from('courses').select('*, modules(count)').eq('status', 'published')
   res.json(data || [])
@@ -68,8 +49,6 @@ router.get('/:id', async (req, res) => {
 })
 
 router.post('/:id/enroll', async (req, res) => {
-  // Clear cache on new enrollment
-  delete enrollmentsCache[req.user.id]
   const { data } = await supabaseAdmin.from('enrollments')
     .upsert({ user_id: req.user.id, course_id: req.params.id }).select().single()
   res.json(data)
