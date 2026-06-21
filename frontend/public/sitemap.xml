@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://warmpath-three.vercel.app/</loc><priority>1.0</priority><changefreq>weekly</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/courses</loc><priority>0.9</priority><changefreq>weekly</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/blog</loc><priority>0.9</priority><changefreq>weekly</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/leaderboard</loc><priority>0.7</priority><changefreq>daily</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/shop</loc><priority>0.7</priority><changefreq>weekly</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/about</loc><priority>0.6</priority><changefreq>monthly</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/faq</loc><priority>0.6</priority><changefreq>monthly</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/contact</loc><priority>0.5</priority><changefreq>monthly</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/privacy</loc><priority>0.3</priority><changefreq>monthly</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/blog/why-i-built-warmpath</loc><priority>0.8</priority><changefreq>monthly</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/blog/how-to-learn-tech-skills</loc><priority>0.8</priority><changefreq>monthly</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/blog/skills-to-get-hired-2026</loc><priority>0.8</priority><changefreq>monthly</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/blog/free-coding-certificate-kenya</loc><priority>0.9</priority><changefreq>monthly</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/blog/fullstack-web-dev-roadmap-2026</loc><priority>0.9</priority><changefreq>monthly</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/blog/python-beginner-guide-africa</loc><priority>0.8</priority><changefreq>monthly</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/blog/remote-tech-jobs-africa-2026</loc><priority>0.8</priority><changefreq>monthly</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/blog/ui-ux-design-free-course</loc><priority>0.8</priority><changefreq>monthly</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/blog/cybersecurity-career-africa</loc><priority>0.8</priority><changefreq>monthly</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/blog/data-science-vs-web-dev</loc><priority>0.8</priority><changefreq>monthly</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/blog/build-portfolio-no-experience</loc><priority>0.8</priority><changefreq>monthly</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/blog/ai-tools-for-learning-2026</loc><priority>0.8</priority><changefreq>monthly</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/blog/freelancing-tech-skills-kenya</loc><priority>0.9</priority><changefreq>monthly</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/blog/cloud-computing-aws-beginners</loc><priority>0.8</priority><changefreq>monthly</changefreq></url>
+  <url><loc>https://warmpath-three.vercel.app/blog/consistency-beats-talent-learning</loc><priority>0.7</priority><changefreq>monthly</changefreq></url>
+</urlset>
