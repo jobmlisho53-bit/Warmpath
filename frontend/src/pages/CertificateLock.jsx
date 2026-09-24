@@ -1,47 +1,171 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import api from '../lib/api'
-import { Award, Lock, CheckCircle, Flame, ArrowRight, ShieldCheck } from 'lucide-react'
+import {
+  Award, Lock, CheckCircle, Flame, ArrowRight,
+  ShieldCheck, Phone, Loader2, AlertCircle, RefreshCw
+} from 'lucide-react'
+
+const POLL_INTERVAL = 3000   // 3 seconds
+const POLL_TIMEOUT  = 120000 // 2 minutes max
 
 export default function CertificateLock() {
-  const { name } = useParams()
-  const { isAuth } = useAuth()
-  const navigate = useNavigate()
-  const [course,    setCourse]    = useState(null)
-  const [progress,  setProgress]  = useState(null)
-  const [cert,      setCert]      = useState(null)
-  const [paying,    setPaying]    = useState(false)
-  const [loading,   setLoading]   = useState(true)
+  const { name }   = useParams()
+  const { user }   = useAuth()
+  const navigate   = useNavigate()
 
+  const [course,   setCourse]   = useState(null)
+  const [progress, setProgress] = useState(null)
+  const [cert,     setCert]     = useState(null)
+  const [loading,  setLoading]  = useState(true)
+
+  // M-Pesa flow state
+  const [phone,    setPhone]    = useState('')
+  const [phoneErr, setPhoneErr] = useState('')
+  const [step,     setStep]     = useState('idle')
+  // idle | sending | waiting | success | failed | timeout
+  const [stkId,    setStkId]    = useState(null)
+  const [pollMsg,  setPollMsg]  = useState('')
+  const [attempts, setAttempts] = useState(0)
+
+  const pollRef    = useRef(null)
+  const timeoutRef = useRef(null)
+
+  // Load course + progress + existing cert
   useEffect(() => {
-    if (!isAuth) { navigate('/login'); return }
-    api.get(`/courses/${name}`).then(async r => {
-      const c = r.data?.course || r.data
-      setCourse(c)
-      const [prog, certRes] = await Promise.allSettled([
-        api.get(`/progress/courses/${c.id}`),
-        api.get(`/certificates/course/${c.id}`),
-      ])
-      if (prog.status === 'fulfilled') setProgress(prog.value.data)
-      if (certRes.status === 'fulfilled') setCert(certRes.value.data?.certificate)
-    }).finally(() => setLoading(false))
-  }, [name, isAuth])
-
-  const pay = async () => {
-    setPaying(true)
-    try {
-      const r = await api.post('/payments/initialize', {
-        courseId: course.id,
-        amount: 99900,
-        email: 'user@example.com',
+    api.get(`/courses/${name}`)
+      .then(async r => {
+        const c = r.data?.course ?? r.data
+        setCourse(c)
+        const [prog, certRes] = await Promise.allSettled([
+          api.get(`/progress/courses/${c.id}`),
+          api.get(`/certificates/course/${c.id}`),
+        ])
+        if (prog.status    === 'fulfilled') setProgress(prog.value.data)
+        if (certRes.status === 'fulfilled' && certRes.value.data?.certificate) {
+          setCert(certRes.value.data.certificate)
+        }
       })
-      window.location.href = r.data.authorization_url
+      .finally(() => setLoading(false))
+  }, [name])
+
+  // If cert already exists, redirect to view
+  useEffect(() => {
+    if (cert) navigate(`/courses/${name}/certificate/view`)
+  }, [cert])
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      clearInterval(pollRef.current)
+      clearTimeout(timeoutRef.current)
+    }
+  }, [])
+
+  // ── Phone validation ──
+  const formatPhone = (raw) => {
+    // Accept: 07XXXXXXXX, 7XXXXXXXX, +2547XXXXXXXX, 2547XXXXXXXX
+    let digits = raw.replace(/\D/g, '')
+    if (digits.startsWith('254')) digits = digits.slice(3)
+    if (digits.startsWith('0'))   digits = digits.slice(1)
+    // Now digits should be 9 chars starting with 7
+    return digits
+  }
+
+  const validatePhone = (raw) => {
+    const d = formatPhone(raw)
+    if (!d) return 'Phone number is required'
+    if (d.length !== 9) return 'Enter a valid 10-digit Safaricom number'
+    if (!['7','1'].includes(d[0])) return 'Must be a Safaricom number (07XX or 01XX)'
+    return ''
+  }
+
+  // ── Initiate STK push ──
+  const sendMpesa = async () => {
+    const err = validatePhone(phone)
+    if (err) { setPhoneErr(err); return }
+    setPhoneErr('')
+    setStep('sending')
+    setPollMsg('')
+
+    try {
+      const internationalPhone = '254' + formatPhone(phone)
+      const res = await api.post('/mpesa/stkpush', {
+        phone:    internationalPhone,
+        amount:   999,
+        courseId: course.id,
+      })
+
+      const id = res.data?.CheckoutRequestID
+               || res.data?.checkout_request_id
+               || res.data?.id
+               || res.data?.requestId
+
+      if (!id) throw new Error('No checkout request ID returned')
+
+      setStkId(id)
+      setStep('waiting')
+      setPollMsg('M-Pesa prompt sent. Enter your PIN on your phone.')
+      setAttempts(0)
+      startPolling(id)
+
     } catch (e) {
-      alert('Payment init failed. Please try again.')
-      setPaying(false)
+      const msg = e.response?.data?.error
+               || e.response?.data?.message
+               || 'Failed to send M-Pesa request. Check your number and try again.'
+      setPollMsg(msg)
+      setStep('failed')
     }
   }
+
+  // ── Polling ──
+  const startPolling = (id) => {
+    // Hard timeout — stop polling after 2 minutes
+    timeoutRef.current = setTimeout(() => {
+      clearInterval(pollRef.current)
+      setStep('timeout')
+      setPollMsg('Payment timed out. No response from M-Pesa after 2 minutes.')
+    }, POLL_TIMEOUT)
+
+    pollRef.current = setInterval(async () => {
+      try {
+        setAttempts(a => a + 1)
+        const res = await api.get(`/mpesa/status/${id}`)
+        const status = res.data?.status
+                    || res.data?.ResultCode
+                    || res.data?.result_code
+
+        if (status === 'completed' || status === '0' || status === 0 || res.data?.paid === true) {
+          clearInterval(pollRef.current)
+          clearTimeout(timeoutRef.current)
+          setStep('success')
+          setPollMsg('Payment confirmed! Unlocking your certificate…')
+          setTimeout(() => navigate(`/courses/${name}/certificate/view`), 2000)
+        } else if (status === 'failed' || status === '1' || status === 1 || res.data?.cancelled === true) {
+          clearInterval(pollRef.current)
+          clearTimeout(timeoutRef.current)
+          setStep('failed')
+          setPollMsg(res.data?.message || 'Payment was cancelled or failed. Please try again.')
+        }
+        // status === 'pending' — keep polling
+      } catch {
+        // Network error during poll — keep trying
+      }
+    }, POLL_INTERVAL)
+  }
+
+  const retry = () => {
+    clearInterval(pollRef.current)
+    clearTimeout(timeoutRef.current)
+    setStep('idle')
+    setStkId(null)
+    setPollMsg('')
+    setAttempts(0)
+  }
+
+  const pct      = progress?.percentage || 0
+  const complete = pct >= 100
 
   if (loading) return (
     <div className="min-h-screen pt-24 flex items-center justify-center">
@@ -49,50 +173,52 @@ export default function CertificateLock() {
     </div>
   )
 
-  if (cert) {
-    navigate(`/courses/${name}/certificate/view`)
-    return null
-  }
-
-  const pct = progress?.percentage || 0
-  const complete = pct >= 100
-
   return (
-    <div className="min-h-screen pt-24 pb-16 flex items-center justify-center p-4">
+    <div className="min-h-screen pt-24 pb-16 flex items-center justify-center p-4 relative">
       <div className="absolute inset-0 bg-ember-mesh pointer-events-none" />
+
       <div className="w-full max-w-lg relative animate-scale-in">
 
-        {/* Blurred cert preview */}
+        {/* Blurred certificate preview */}
         <div className="relative mb-6">
-          <div className="card p-8 text-center border-sand-500/20 bg-gradient-to-br from-sand-900/40 to-terra-900/40 overflow-hidden">
+          <div className="card p-8 text-center border-sand-500/20 overflow-hidden"
+            style={{ background:'linear-gradient(135deg,rgba(28,24,21,0.9),rgba(44,33,20,0.9))' }}>
             <div className="absolute inset-0 backdrop-blur-sm" />
             <div className="relative opacity-20 pointer-events-none select-none">
-              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-sand-400 to-sand-600 mx-auto mb-4 flex items-center justify-center">
-                <Award size={28} className="text-white" />
+              <div className="w-14 h-14 rounded-full mx-auto mb-3 flex items-center justify-center"
+                style={{ background:'linear-gradient(135deg,#C49552,#A87A3C)' }}>
+                <Award size={24} className="text-white" />
               </div>
-              <p className="font-display text-2xl font-700 text-[var(--text-base)] mb-1">Certificate of Completion</p>
-              <p className="text-ink-400 mb-3">This certifies that</p>
-              <p className="font-display text-3xl font-700 text-[var(--text-base)]">Your Name Here</p>
-              <p className="text-ink-400 mt-2">has successfully completed</p>
-              <p className="font-display text-xl font-600 text-ember-400 mt-1">{course?.title}</p>
+              <p className="font-display text-lg font-700 text-[var(--text-base)]">Certificate of Completion</p>
+              <p className="text-ink-400 text-sm my-2">This certifies that</p>
+              <p className="font-display text-2xl font-700">{user?.user_metadata?.full_name || 'Your Name'}</p>
+              <p className="text-ink-400 text-sm mt-2">has successfully completed</p>
+              <p className="font-display text-base font-600 text-ember-400 mt-1">{course?.title}</p>
             </div>
-            {/* Lock overlay */}
             <div className="absolute inset-0 flex items-center justify-center">
-              <div className="bg-[var(--bg-raised)]/90 backdrop-blur-sm rounded-2xl p-5 flex flex-col items-center gap-2 border border-[var(--border-mid)]">
-                <Lock size={24} className="text-ember-400" />
+              <div className="rounded-2xl p-4 flex flex-col items-center gap-2 border border-[var(--border-mid)]"
+                style={{ background:'rgba(28,24,21,0.85)', backdropFilter:'blur(8px)' }}>
+                <Lock size={20} className="text-ember-400" />
                 <p className="text-sm font-medium text-[var(--text-base)]">Certificate locked</p>
               </div>
             </div>
           </div>
         </div>
 
+        {/* Main card */}
         <div className="card p-8 border-[var(--border-mid)] shadow-lifted">
+
+          {/* Header */}
           <div className="text-center mb-6">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-ember-500 to-terra-600 flex items-center justify-center mx-auto mb-4 shadow-glow-ember">
+            <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-glow-ember"
+              style={{ background:'linear-gradient(135deg,#F07A1A,#C85528)' }}>
               <Award size={24} className="text-white" />
             </div>
-            <h1 className="font-display text-2xl font-700 mb-2">Unlock your certificate</h1>
-            <p className="text-sm text-ink-400">Earn a verified certificate for <span className="text-[var(--text-base)] font-medium">{course?.title}</span></p>
+            <h1 className="font-display text-2xl font-700 mb-1">Unlock your certificate</h1>
+            <p className="text-sm text-ink-400">
+              Pay <span className="text-ember-400 font-medium">KES 999</span> via M-Pesa to unlock your verified certificate for{' '}
+              <span className="text-[var(--text-base)] font-medium">{course?.title}</span>
+            </p>
           </div>
 
           {/* Progress check */}
@@ -100,7 +226,7 @@ export default function CertificateLock() {
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 {complete
-                  ? <CheckCircle size={16} className="text-sage-400" />
+                  ? <CheckCircle size={15} className="text-sage-400" />
                   : <div className="w-4 h-4 rounded-full border-2 border-ink-500" />
                 }
                 <span className={`text-sm font-medium ${complete ? 'text-sage-400' : 'text-ink-300'}`}>
@@ -110,12 +236,10 @@ export default function CertificateLock() {
               <span className={`text-sm font-medium ${complete ? 'text-sage-400' : 'text-ember-400'}`}>{pct}%</span>
             </div>
             <div className="progress-bar">
-              <div className="progress-fill" style={{ width: `${pct}%` }} />
+              <div className="progress-fill" style={{ width:`${pct}%` }} />
             </div>
             {!complete && (
-              <p className="text-xs text-ink-500 mt-2">
-                Complete all lessons to unlock your certificate
-              </p>
+              <p className="text-xs text-ink-500 mt-2">Complete all lessons to unlock your certificate</p>
             )}
           </div>
 
@@ -123,12 +247,12 @@ export default function CertificateLock() {
           <div className="space-y-2.5 mb-6">
             {[
               'Unique verification code — shareable anywhere',
-              'Printable PDF quality certificate',
+              'Printable certificate with your name',
               'Permanently on your WarmPath profile',
               'One-time payment — yours forever',
             ].map(p => (
               <div key={p} className="flex items-start gap-2.5 text-sm text-ink-300">
-                <ShieldCheck size={15} className="text-ember-400 flex-shrink-0 mt-0.5" />
+                <ShieldCheck size={14} className="text-ember-400 flex-shrink-0 mt-0.5" />
                 {p}
               </div>
             ))}
@@ -136,34 +260,141 @@ export default function CertificateLock() {
 
           <div className="divider mb-6" />
 
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-sm text-ink-400">Certificate fee</span>
-            <span className="font-display text-2xl font-700 text-[var(--text-base)]">KES 999</span>
-          </div>
+          {/* ── IDLE — show phone input ── */}
+          {(step === 'idle' || step === 'failed' || step === 'timeout') && (
+            <>
+              {/* Error / timeout message */}
+              {(step === 'failed' || step === 'timeout') && pollMsg && (
+                <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/20 mb-5 animate-fade-in">
+                  <AlertCircle size={15} className="text-red-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-sm text-red-400">{pollMsg}</p>
+                </div>
+              )}
 
-          <button onClick={pay} disabled={paying || !complete}
-            className="btn-primary w-full justify-center py-3.5 text-base">
-            {paying ? (
-              <span className="flex items-center gap-2">
-                <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="40" strokeDashoffset="10"/>
-                </svg>
-                Redirecting to Paystack…
-              </span>
-            ) : !complete ? (
-              <><Lock size={16} /> Complete course to unlock</>
-            ) : (
-              <>Pay KES 999 <ArrowRight size={16} /></>
-            )}
-          </button>
+              <div className="mb-4">
+                <label className="label">Safaricom M-Pesa number</label>
+                <div className="relative">
+                  <Phone size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-faint)]" />
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={e => {
+                      setPhone(e.target.value)
+                      setPhoneErr('')
+                    }}
+                    placeholder="07XX XXX XXX"
+                    maxLength={13}
+                    className="input-field pl-10"
+                  />
+                </div>
+                {phoneErr && (
+                  <p className="text-xs text-red-400 mt-1.5">{phoneErr}</p>
+                )}
+                <p className="text-xs text-ink-500 mt-1.5">
+                  You will receive an M-Pesa prompt on this number
+                </p>
+              </div>
 
-          {!complete && (
-            <Link to={`/courses/${name}`}
-              className="btn-ghost w-full justify-center mt-3 text-sm">
-              <Flame size={14} /> Continue learning
-            </Link>
+              <div className="flex items-center justify-between mb-5">
+                <span className="text-sm text-ink-400">Amount</span>
+                <span className="font-display text-2xl font-700 text-[var(--text-base)]">KES 999</span>
+              </div>
+
+              <button
+                onClick={sendMpesa}
+                disabled={!complete}
+                className="btn-primary w-full justify-center py-3.5 text-base gap-2">
+                {!complete
+                  ? <><Lock size={16} /> Complete course to unlock</>
+                  : <><Phone size={16} /> Send M-Pesa request</>
+                }
+              </button>
+
+              {!complete && (
+                <Link to={`/courses/${name}`} className="btn-ghost w-full justify-center mt-3 text-sm gap-1.5">
+                  <Flame size={14} /> Continue learning
+                </Link>
+              )}
+            </>
           )}
+
+          {/* ── SENDING ── */}
+          {step === 'sending' && (
+            <div className="text-center py-6 animate-fade-in">
+              <Loader2 size={32} className="text-ember-400 mx-auto mb-4 animate-spin" />
+              <p className="font-medium text-[var(--text-base)] mb-1">Sending M-Pesa request…</p>
+              <p className="text-sm text-ink-400">Connecting to Safaricom</p>
+            </div>
+          )}
+
+          {/* ── WAITING — polling ── */}
+          {step === 'waiting' && (
+            <div className="animate-fade-in">
+              <div className="text-center py-4 mb-5">
+                <div className="relative inline-flex mb-4">
+                  <div className="w-16 h-16 rounded-2xl bg-ember-500/10 border border-ember-500/20 flex items-center justify-center">
+                    <Phone size={26} className="text-ember-400" />
+                  </div>
+                  <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-ember-500 flex items-center justify-center animate-pulse-slow">
+                    <div className="w-2 h-2 rounded-full bg-white" />
+                  </div>
+                </div>
+                <p className="font-display font-600 text-[var(--text-base)] mb-1">Check your phone</p>
+                <p className="text-sm text-ink-400 leading-relaxed">{pollMsg}</p>
+              </div>
+
+              {/* Steps */}
+              <div className="space-y-2.5 mb-5">
+                {[
+                  'M-Pesa PIN prompt sent to your phone',
+                  'Enter your M-Pesa PIN to approve',
+                  'Wait for confirmation SMS',
+                ].map((s, i) => (
+                  <div key={i} className="flex items-center gap-3 text-sm text-ink-300">
+                    <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                      style={{ background:'linear-gradient(135deg,#F07A1A,#C85528)' }}>
+                      <span className="text-white text-xs font-700">{i + 1}</span>
+                    </div>
+                    {s}
+                  </div>
+                ))}
+              </div>
+
+              {/* Polling indicator */}
+              <div className="flex items-center justify-center gap-2 text-xs text-ink-500 mb-5">
+                <RefreshCw size={11} className="animate-spin" />
+                Checking payment status… (attempt {attempts})
+              </div>
+
+              <button onClick={retry} className="btn-ghost w-full justify-center text-sm">
+                Cancel and try again
+              </button>
+            </div>
+          )}
+
+          {/* ── SUCCESS ── */}
+          {step === 'success' && (
+            <div className="text-center py-6 animate-scale-in">
+              <div className="w-16 h-16 rounded-2xl bg-sage-500/10 border border-sage-500/20 flex items-center justify-center mx-auto mb-4">
+                <CheckCircle size={30} className="text-sage-400" />
+              </div>
+              <p className="font-display text-xl font-700 text-[var(--text-base)] mb-2">Payment confirmed!</p>
+              <p className="text-sm text-ink-400 mb-1">{pollMsg}</p>
+              <p className="text-xs text-ink-500 flex items-center justify-center gap-1">
+                <Loader2 size={11} className="animate-spin" /> Redirecting to your certificate…
+              </p>
+            </div>
+          )}
+
         </div>
+
+        {/* Help text */}
+        <p className="text-center text-xs text-ink-500 mt-5">
+          Having trouble?{' '}
+          <a href="mailto:jobmlisho63@gmail.com" className="text-ember-400 hover:text-ember-300 transition-colors">
+            Contact support
+          </a>
+        </p>
       </div>
     </div>
   )

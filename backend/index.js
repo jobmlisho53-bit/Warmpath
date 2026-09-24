@@ -16,6 +16,8 @@ const communityRouter = require('./routes/community');
 const shopRouter = require('./routes/shop');
 const adminShopRouter = require('./routes/adminShop');
 const { router: adminAuthRouter, adminAuthMiddleware } = require('./routes/adminAuth');
+const mpesaRouter = require('./routes/mpesa');
+const mpesaRouter = require('./routes/mpesa');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -118,6 +120,8 @@ app.get('/api/community/courses/:courseId/discussions', (req, res) => {
 // ============================================
 
 app.use('/api/progress', authMiddleware, progressRouter);
+app.use('/api/mpesa', authMiddleware, mpesaRouter);
+app.use('/api/mpesa', authMiddleware, mpesaRouter);
 app.use('/api/payments', authMiddleware, paymentsRouter);
 app.use('/api/certificates', authMiddleware, certificatesRouter);
 app.use('/api/gamification', authMiddleware, gamificationRouter);
