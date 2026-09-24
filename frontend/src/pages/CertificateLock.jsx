@@ -7,25 +7,25 @@ import {
   ShieldCheck, Phone, Loader2, AlertCircle, RefreshCw
 } from 'lucide-react'
 
-const POLL_INTERVAL = 3000   // 3 seconds
-const POLL_TIMEOUT  = 120000 // 2 minutes max
+const POLL_INTERVAL = 3000    // 3 seconds
+const POLL_TIMEOUT  = 120000  // 2 minutes max
 
 export default function CertificateLock() {
-  const { name }   = useParams()
-  const { user }   = useAuth()
-  const navigate   = useNavigate()
+  const { name }  = useParams()
+  const { user }  = useAuth()
+  const navigate  = useNavigate()
 
   const [course,   setCourse]   = useState(null)
   const [progress, setProgress] = useState(null)
   const [cert,     setCert]     = useState(null)
   const [loading,  setLoading]  = useState(true)
 
-  // M-Pesa flow state
+  // M-Pesa flow
   const [phone,    setPhone]    = useState('')
   const [phoneErr, setPhoneErr] = useState('')
   const [step,     setStep]     = useState('idle')
-  // idle | sending | waiting | success | failed | timeout
   const [stkId,    setStkId]    = useState(null)
+  const [receipt,  setReceipt]  = useState(null)
   const [pollMsg,  setPollMsg]  = useState('')
   const [attempts, setAttempts] = useState(0)
 
@@ -50,12 +50,12 @@ export default function CertificateLock() {
       .finally(() => setLoading(false))
   }, [name])
 
-  // If cert already exists, redirect to view
+  // Already has cert — redirect straight to view
   useEffect(() => {
     if (cert) navigate(`/courses/${name}/certificate/view`)
   }, [cert])
 
-  // Cleanup polling on unmount
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       clearInterval(pollRef.current)
@@ -63,19 +63,17 @@ export default function CertificateLock() {
     }
   }, [])
 
-  // ── Phone validation ──
+  // ── Phone helpers ──
   const formatPhone = (raw) => {
-    // Accept: 07XXXXXXXX, 7XXXXXXXX, +2547XXXXXXXX, 2547XXXXXXXX
     let digits = raw.replace(/\D/g, '')
     if (digits.startsWith('254')) digits = digits.slice(3)
     if (digits.startsWith('0'))   digits = digits.slice(1)
-    // Now digits should be 9 chars starting with 7
-    return digits
+    return digits  // 9 digits, e.g. "712345678"
   }
 
   const validatePhone = (raw) => {
     const d = formatPhone(raw)
-    if (!d) return 'Phone number is required'
+    if (!d)          return 'Phone number is required'
     if (d.length !== 9) return 'Enter a valid 10-digit Safaricom number'
     if (!['7','1'].includes(d[0])) return 'Must be a Safaricom number (07XX or 01XX)'
     return ''
@@ -91,18 +89,18 @@ export default function CertificateLock() {
 
     try {
       const internationalPhone = '254' + formatPhone(phone)
+
+      // POST /api/mpesa/stkpush
       const res = await api.post('/mpesa/stkpush', {
         phone:    internationalPhone,
         amount:   999,
         courseId: course.id,
       })
 
-      const id = res.data?.CheckoutRequestID
-               || res.data?.checkout_request_id
-               || res.data?.id
-               || res.data?.requestId
+      // ← exact field name from backend: checkoutRequestId (camelCase)
+      const id = res.data?.checkoutRequestId
 
-      if (!id) throw new Error('No checkout request ID returned')
+      if (!id) throw new Error('No checkoutRequestId in response')
 
       setStkId(id)
       setStep('waiting')
@@ -112,7 +110,8 @@ export default function CertificateLock() {
 
     } catch (e) {
       const msg = e.response?.data?.error
-               || e.response?.data?.message
+               || e.response?.data?.details
+               || e.message
                || 'Failed to send M-Pesa request. Check your number and try again.'
       setPollMsg(msg)
       setStep('failed')
@@ -121,36 +120,44 @@ export default function CertificateLock() {
 
   // ── Polling ──
   const startPolling = (id) => {
-    // Hard timeout — stop polling after 2 minutes
+    // Hard stop after 2 minutes
     timeoutRef.current = setTimeout(() => {
       clearInterval(pollRef.current)
       setStep('timeout')
-      setPollMsg('Payment timed out. No response from M-Pesa after 2 minutes.')
+      setPollMsg('No response from M-Pesa after 2 minutes. Please try again.')
     }, POLL_TIMEOUT)
 
     pollRef.current = setInterval(async () => {
       try {
         setAttempts(a => a + 1)
-        const res = await api.get(`/mpesa/status/${id}`)
-        const status = res.data?.status
-                    || res.data?.ResultCode
-                    || res.data?.result_code
 
-        if (status === 'completed' || status === '0' || status === 0 || res.data?.paid === true) {
+        // GET /api/mpesa/status/:checkoutRequestId
+        const res    = await api.get(`/mpesa/status/${id}`)
+        const status = res.data?.status  // exactly: "pending" | "completed" | "failed"
+
+        if (status === 'completed') {
           clearInterval(pollRef.current)
           clearTimeout(timeoutRef.current)
+          setReceipt(res.data?.receipt || null)
           setStep('success')
           setPollMsg('Payment confirmed! Unlocking your certificate…')
+          // Redirect to certificate view after 2 seconds
           setTimeout(() => navigate(`/courses/${name}/certificate/view`), 2000)
-        } else if (status === 'failed' || status === '1' || status === 1 || res.data?.cancelled === true) {
+
+        } else if (status === 'failed') {
           clearInterval(pollRef.current)
           clearTimeout(timeoutRef.current)
           setStep('failed')
-          setPollMsg(res.data?.message || 'Payment was cancelled or failed. Please try again.')
+          setPollMsg('Payment was cancelled or failed. Please try again.')
+
         }
-        // status === 'pending' — keep polling
-      } catch {
-        // Network error during poll — keep trying
+        // status === 'pending' — do nothing, keep polling
+
+      } catch (e) {
+        // 404 "Not found" or network error — keep polling, don't crash
+        if (e.response?.status === 404) {
+          // Transaction not yet in DB — normal during first few seconds
+        }
       }
     }, POLL_INTERVAL)
   }
@@ -160,6 +167,7 @@ export default function CertificateLock() {
     clearTimeout(timeoutRef.current)
     setStep('idle')
     setStkId(null)
+    setReceipt(null)
     setPollMsg('')
     setAttempts(0)
   }
@@ -191,7 +199,9 @@ export default function CertificateLock() {
               </div>
               <p className="font-display text-lg font-700 text-[var(--text-base)]">Certificate of Completion</p>
               <p className="text-ink-400 text-sm my-2">This certifies that</p>
-              <p className="font-display text-2xl font-700">{user?.user_metadata?.full_name || 'Your Name'}</p>
+              <p className="font-display text-2xl font-700">
+                {user?.user_metadata?.full_name || 'Your Name'}
+              </p>
               <p className="text-ink-400 text-sm mt-2">has successfully completed</p>
               <p className="font-display text-base font-600 text-ember-400 mt-1">{course?.title}</p>
             </div>
@@ -216,13 +226,18 @@ export default function CertificateLock() {
             </div>
             <h1 className="font-display text-2xl font-700 mb-1">Unlock your certificate</h1>
             <p className="text-sm text-ink-400">
-              Pay <span className="text-ember-400 font-medium">KES 999</span> via M-Pesa to unlock your verified certificate for{' '}
+              Pay <span className="text-ember-400 font-medium">KES 999</span> via M-Pesa to unlock
+              your verified certificate for{' '}
               <span className="text-[var(--text-base)] font-medium">{course?.title}</span>
             </p>
           </div>
 
           {/* Progress check */}
-          <div className={`rounded-xl p-4 mb-6 border ${complete ? 'bg-sage-500/10 border-sage-500/20' : 'bg-[var(--bg-surface)] border-[var(--border-mid)]'}`}>
+          <div className={`rounded-xl p-4 mb-6 border ${
+            complete
+              ? 'bg-sage-500/10 border-sage-500/20'
+              : 'bg-[var(--bg-surface)] border-[var(--border-mid)]'
+          }`}>
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 {complete
@@ -233,7 +248,9 @@ export default function CertificateLock() {
                   Course completion
                 </span>
               </div>
-              <span className={`text-sm font-medium ${complete ? 'text-sage-400' : 'text-ember-400'}`}>{pct}%</span>
+              <span className={`text-sm font-medium ${complete ? 'text-sage-400' : 'text-ember-400'}`}>
+                {pct}%
+              </span>
             </div>
             <div className="progress-bar">
               <div className="progress-fill" style={{ width:`${pct}%` }} />
@@ -260,38 +277,33 @@ export default function CertificateLock() {
 
           <div className="divider mb-6" />
 
-          {/* ── IDLE — show phone input ── */}
-          {(step === 'idle' || step === 'failed' || step === 'timeout') && (
+          {/* ── IDLE / FAILED / TIMEOUT — phone input ── */}
+          {['idle','failed','timeout'].includes(step) && (
             <>
-              {/* Error / timeout message */}
-              {(step === 'failed' || step === 'timeout') && pollMsg && (
+              {/* Error message */}
+              {['failed','timeout'].includes(step) && pollMsg && (
                 <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/20 mb-5 animate-fade-in">
                   <AlertCircle size={15} className="text-red-400 flex-shrink-0 mt-0.5" />
                   <p className="text-sm text-red-400">{pollMsg}</p>
                 </div>
               )}
 
-              <div className="mb-4">
+              <div className="mb-5">
                 <label className="label">Safaricom M-Pesa number</label>
                 <div className="relative">
                   <Phone size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-faint)]" />
                   <input
                     type="tel"
                     value={phone}
-                    onChange={e => {
-                      setPhone(e.target.value)
-                      setPhoneErr('')
-                    }}
+                    onChange={e => { setPhone(e.target.value); setPhoneErr('') }}
                     placeholder="07XX XXX XXX"
                     maxLength={13}
                     className="input-field pl-10"
                   />
                 </div>
-                {phoneErr && (
-                  <p className="text-xs text-red-400 mt-1.5">{phoneErr}</p>
-                )}
+                {phoneErr && <p className="text-xs text-red-400 mt-1.5">{phoneErr}</p>}
                 <p className="text-xs text-ink-500 mt-1.5">
-                  You will receive an M-Pesa prompt on this number
+                  You will receive an M-Pesa PIN prompt on this number
                 </p>
               </div>
 
@@ -311,7 +323,8 @@ export default function CertificateLock() {
               </button>
 
               {!complete && (
-                <Link to={`/courses/${name}`} className="btn-ghost w-full justify-center mt-3 text-sm gap-1.5">
+                <Link to={`/courses/${name}`}
+                  className="btn-ghost w-full justify-center mt-3 text-sm gap-1.5">
                   <Flame size={14} /> Continue learning
                 </Link>
               )}
@@ -327,7 +340,7 @@ export default function CertificateLock() {
             </div>
           )}
 
-          {/* ── WAITING — polling ── */}
+          {/* ── WAITING — active polling ── */}
           {step === 'waiting' && (
             <div className="animate-fade-in">
               <div className="text-center py-4 mb-5">
@@ -343,27 +356,25 @@ export default function CertificateLock() {
                 <p className="text-sm text-ink-400 leading-relaxed">{pollMsg}</p>
               </div>
 
-              {/* Steps */}
               <div className="space-y-2.5 mb-5">
                 {[
                   'M-Pesa PIN prompt sent to your phone',
                   'Enter your M-Pesa PIN to approve',
-                  'Wait for confirmation SMS',
+                  'Wait for the confirmation SMS',
                 ].map((s, i) => (
                   <div key={i} className="flex items-center gap-3 text-sm text-ink-300">
-                    <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                    <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-700"
                       style={{ background:'linear-gradient(135deg,#F07A1A,#C85528)' }}>
-                      <span className="text-white text-xs font-700">{i + 1}</span>
+                      {i + 1}
                     </div>
                     {s}
                   </div>
                 ))}
               </div>
 
-              {/* Polling indicator */}
               <div className="flex items-center justify-center gap-2 text-xs text-ink-500 mb-5">
                 <RefreshCw size={11} className="animate-spin" />
-                Checking payment status… (attempt {attempts})
+                Checking payment status… (check {attempts})
               </div>
 
               <button onClick={retry} className="btn-ghost w-full justify-center text-sm">
@@ -378,20 +389,27 @@ export default function CertificateLock() {
               <div className="w-16 h-16 rounded-2xl bg-sage-500/10 border border-sage-500/20 flex items-center justify-center mx-auto mb-4">
                 <CheckCircle size={30} className="text-sage-400" />
               </div>
-              <p className="font-display text-xl font-700 text-[var(--text-base)] mb-2">Payment confirmed!</p>
-              <p className="text-sm text-ink-400 mb-1">{pollMsg}</p>
+              <p className="font-display text-xl font-700 text-[var(--text-base)] mb-2">
+                Payment confirmed!
+              </p>
+              {receipt && (
+                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-sage-500/10 border border-sage-500/20 mb-3">
+                  <CheckCircle size={13} className="text-sage-400" />
+                  <span className="text-xs font-mono text-sage-400">M-Pesa receipt: {receipt}</span>
+                </div>
+              )}
+              <p className="text-sm text-ink-400 mb-2">{pollMsg}</p>
               <p className="text-xs text-ink-500 flex items-center justify-center gap-1">
                 <Loader2 size={11} className="animate-spin" /> Redirecting to your certificate…
               </p>
             </div>
           )}
-
         </div>
 
-        {/* Help text */}
         <p className="text-center text-xs text-ink-500 mt-5">
           Having trouble?{' '}
-          <a href="mailto:jobmlisho63@gmail.com" className="text-ember-400 hover:text-ember-300 transition-colors">
+          <a href="mailto:jobmlisho63@gmail.com"
+            className="text-ember-400 hover:text-ember-300 transition-colors">
             Contact support
           </a>
         </p>
